@@ -54,7 +54,7 @@ certutil -hashfile CTRLabConnect.lua SHA256      # Windows
 shasum -a 256 CTRLabConnect.lua                  # macOS / Linux
 ```
 
-Current version: **0.2.0**, SHA-256 `8d1753d848ec28d3ddd3614af71367bf8055796b53f1b6ced14a95a944333862`.
+Current version: **0.3.0**, SHA-256 `c1e6c9dfe4e99dda46e3253e6409938231c0c84a9553d9b7e58741a187a7a9b3`.
 
 ## Contributing
 
