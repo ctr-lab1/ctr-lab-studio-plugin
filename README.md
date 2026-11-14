@@ -10,7 +10,7 @@ Public page with the same information: <https://ctr-lab.com/plugin>
 
 Only after you press **Send to CTR Lab**, and you see the full list first:
 
-- the place name
+- the place name and place ID (a public number, 0 if the place is not published; it lets a new scan update the same game)
 - counts of instances, scripts and remotes
 - script paths and class names
 - line counts of each script
@@ -54,7 +54,9 @@ certutil -hashfile CTRLabConnect.lua SHA256      # Windows
 shasum -a 256 CTRLabConnect.lua                  # macOS / Linux
 ```
 
-Current version: **0.3.0**, SHA-256 `c1e6c9dfe4e99dda46e3253e6409938231c0c84a9553d9b7e58741a187a7a9b3`.
+Current version: **0.4.0**, SHA-256 `221e69afde6cccec6905fa51ec4a859f59fe0d9c5c496f20b6ff70a85699fa40`.
+
+You can also check your copy on <https://ctr-lab.com/plugin>: it fetches this file from GitHub in your browser and compares it with yours, so the reference never comes from CTR Lab's own server.
 
 ## Contributing
 

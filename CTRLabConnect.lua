@@ -1,6 +1,6 @@
 --[[
 	CTR Lab Connect for Roblox Studio
-	Version 0.3.0 (closed beta)
+	Version 0.4.0 (closed beta)
 
 	WHAT IT DOES
 	Reads the structure of the place you have open and, only after you review it and press "Send",
@@ -8,7 +8,8 @@
 	thumbnail brief you can use in the CTR Lab chat.
 
 	WHAT IT SENDS (shown to you in full before anything leaves Studio)
-	  place name, instance / script / remote counts, script paths and class names, line counts,
+	  place name and place ID (a public number, 0 if the place is not published),
+	  instance / script / remote counts, script paths and class names, line counts,
 	  function names, require paths, remote names, service names.
 
 	WHAT IT NEVER SENDS
@@ -48,7 +49,7 @@ local HttpService = game:GetService("HttpService")
 
 local API = "https://ctr-lab.com/api/apps/6af3066f697d7b1811bcf9a9/functions/"
 local TOKEN_KEY = "CTRLabToken"
-local VERSION = "0.3.0"
+local VERSION = "0.4.0"
 local MAX_SCRIPTS = 400
 local MAX_NAMES = 40
 local MAX_REMOTES = 200
@@ -377,6 +378,7 @@ local function collect()
 	table.sort(services)
 	return {
 		place_name = game.Name,
+		place_id = game.PlaceId,
 		stats = { instances = instanceCount, scripts = scriptTotal, remotes = #remoteNames },
 		scripts = scripts,
 		remotes = remoteNames,
@@ -387,7 +389,7 @@ end
 -- The exact content of the summary as readable entries, so the user can check it before sending.
 local function buildItems(payload)
 	local items = {}
-	local head = "Place: " .. payload.place_name
+	local head = string.format("Place: %s  (place ID %.0f)", payload.place_name, payload.place_id)
 	head = head .. "\nServices: " .. (#payload.services > 0 and table.concat(payload.services, ", ") or "none")
 	table.insert(items, head)
 	for _, r in ipairs(payload.remotes) do
