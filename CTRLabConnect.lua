@@ -1,6 +1,6 @@
 --[[
 	CTR Lab Connect for Roblox Studio
-	Version 0.4.0 (closed beta)
+	Version 0.5.0 (closed beta)
 
 	WHAT IT DOES
 	Reads the structure of the place you have open and, only after you review it and press "Send",
@@ -19,6 +19,7 @@
 	NETWORK
 	  Two requests only, both to https://ctr-lab.com: "pluginPair" (links this Studio with a
 	  one-time code from your CTR Lab account) and "pluginAnalyze" (sends the summary you approved).
+	  The only other thing it loads is its own logo image from Roblox.
 
 	INSTALL
 	  1. In Studio add a new Script, paste this whole file into it.
@@ -46,39 +47,41 @@
 ]]
 
 local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local API = "https://ctr-lab.com/api/apps/6af3066f697d7b1811bcf9a9/functions/"
 local TOKEN_KEY = "CTRLabToken"
-local VERSION = "0.4.0"
+local VERSION = "0.5.0"
+local LOGO = "rbxassetid://131268296952051" -- the CTR Lab logo (image asset, 794 x 216)
+local LOGO_RATIO = 794 / 216
 local MAX_SCRIPTS = 400
 local MAX_NAMES = 40
 local MAX_REMOTES = 200
 local PAGE_SIZE = 8 -- entries per page in the review list, keeps the window light
 
--- Colours match the CTR Lab website (dark with a lime green accent).
-local C = {
-	bg = Color3.fromRGB(9, 11, 10),
-	card = Color3.fromRGB(16, 19, 18),
-	input = Color3.fromRGB(26, 30, 28),
-	border = Color3.fromRGB(35, 41, 38),
-	text = Color3.fromRGB(245, 247, 245),
-	muted = Color3.fromRGB(161, 175, 168),
-	green = Color3.fromRGB(166, 255, 0),
-	greenHover = Color3.fromRGB(190, 255, 60),
-	onGreen = Color3.fromRGB(6, 14, 10),
-	red = Color3.fromRGB(255, 107, 107),
-}
-local FONT = Enum.Font.GothamMedium
+-- The same look as the CTR Lab Hub: near black green, lime accent, the lime glow is Roblox's own UIShadow.
+local LIME = Color3.fromRGB(170, 255, 0)
+local LIME_HOVER = Color3.fromRGB(196, 255, 64)
+local ON_LIME = Color3.fromRGB(9, 13, 7)
+local BG = Color3.fromRGB(9, 13, 7)
+local CARD = Color3.fromRGB(15, 22, 11)
+local CARD_HOVER = Color3.fromRGB(21, 31, 15)
+local FIELD = Color3.fromRGB(6, 9, 5)
+local INK = Color3.fromRGB(236, 246, 224)
+local MUTED = Color3.fromRGB(128, 148, 108)
+local RED = Color3.fromRGB(255, 107, 107)
+local FONT = Enum.Font.Gotham
 local FONT_BOLD = Enum.Font.GothamBold
 
 ---------------------------------------------------------------------------
--- Window
+-- Window and building blocks
 ---------------------------------------------------------------------------
 local toolbar = plugin:CreateToolbar("CTR Lab")
 local toggle = toolbar:CreateButton("CTR Lab", "Open CTR Lab Connect", "")
 toggle.ClickableWhenViewportHidden = true
 
-local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 340, 560, 300, 360)
+local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 340, 600, 300, 380)
 local widget = plugin:CreateDockWidgetPluginGui("CTRLabConnect", info)
 widget.Title = "CTR Lab"
 
@@ -91,12 +94,21 @@ local function make(class, props, parent)
 	return o
 end
 
+local function tween(obj, time, goal)
+	TweenService:Create(obj, TweenInfo.new(time, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), goal):Play()
+end
+
 local function corner(parent, radius)
 	return make("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
 end
 
-local function stroke(parent, color)
-	return make("UIStroke", { Color = color, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, parent)
+local function stroke(parent, color, thickness, transparency)
+	return make("UIStroke", {
+		Color = color,
+		Thickness = thickness,
+		Transparency = transparency,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, parent)
 end
 
 local function pad(parent, amount)
@@ -108,31 +120,31 @@ local function pad(parent, amount)
 	}, parent)
 end
 
--- Roblox's own UIShadow. Wrapped in pcall so an older Studio simply shows no shadow.
-local function shadow(parent)
-	pcall(function()
-		make("UIShadow", {
-			Color = Color3.new(0, 0, 0),
-			Transparency = 0.5,
-			BlurRadius = UDim.new(0, 12),
-			Offset = UDim2.fromOffset(0, 3),
-			ShowBehindParent = true,
+-- Roblox's own UIShadow as a lime glow. If a Studio does not know it, the UI simply has no glow.
+local function glow(parent, blur, transparency)
+	local ok, shadow = pcall(function()
+		return make("UIShadow", {
+			Color = LIME,
+			BlurRadius = UDim.new(0, blur),
+			Transparency = transparency,
+			Spread = UDim2.fromOffset(2, 2),
 		}, parent)
 	end)
+	return ok and shadow or nil
 end
 
 local page = make("ScrollingFrame", {
 	Size = UDim2.fromScale(1, 1),
-	BackgroundColor3 = C.bg,
+	BackgroundColor3 = BG,
 	BorderSizePixel = 0,
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	CanvasSize = UDim2.new(),
 	ScrollBarThickness = 4,
-	ScrollBarImageColor3 = C.border,
+	ScrollBarImageColor3 = MUTED,
 	ScrollingDirection = Enum.ScrollingDirection.Y,
 }, widget)
-make("UIListLayout", { Padding = UDim.new(0, 14), SortOrder = Enum.SortOrder.LayoutOrder }, page)
-pad(page, 16)
+make("UIListLayout", { Padding = UDim.new(0, 18), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+pad(page, 22) -- room for the glow, so it is never cut off at the edge
 
 local function label(parent, text, size, color, font, order)
 	return make("TextLabel", {
@@ -150,52 +162,67 @@ local function label(parent, text, size, color, font, order)
 	}, parent)
 end
 
-local function card(order, title)
+local function card(order, number, title)
 	local f = make("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = C.card,
+		BackgroundColor3 = CARD,
 		BorderSizePixel = 0,
 		LayoutOrder = order,
 	}, page)
-	corner(f, 12)
-	stroke(f, C.border)
-	shadow(f)
-	pad(f, 14)
-	make("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, f)
-	label(f, title, 15, C.text, FONT_BOLD, 0)
+	corner(f, 16)
+	stroke(f, LIME, 1, 0.75)
+	glow(f, 22, 0.84)
+	pad(f, 16)
+	make("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, f)
+	local head = label(f, string.format('<font color="#AAFF00">%s</font>    %s', number, title), 15, INK, FONT_BOLD, 0)
+	head.RichText = true
 	return f
 end
 
+-- Primary: lime fill. Ghost: dark with lime text and outline. Both glow on hover, like the Hub.
 local function button(parent, text, order, primary, size)
-	local base = primary and C.green or C.input
-	local hover = primary and C.greenHover or C.border
+	local rest = primary and LIME or BG
+	local hover = primary and LIME_HOVER or CARD_HOVER
+	local idleGlow = primary and 0.8 or 1
+	local hoverGlow = primary and 0.55 or 0.8
 	local b = make("TextButton", {
-		Size = size or UDim2.new(1, 0, 0, 36),
-		BackgroundColor3 = base,
+		Size = size or UDim2.new(1, 0, 0, 42),
+		BackgroundColor3 = rest,
 		BorderSizePixel = 0,
 		AutoButtonColor = false,
 		Text = text,
-		TextColor3 = primary and C.onGreen or C.text,
+		TextColor3 = primary and ON_LIME or LIME,
 		Font = FONT_BOLD,
 		TextSize = 14,
 		LayoutOrder = order,
 	}, parent)
-	corner(b, 8)
-	if not primary then
-		stroke(b, C.border)
-	end
+	corner(b, 12)
+	local outline = (not primary) and stroke(b, LIME, 1.5, 0.55) or nil
+	local shadow = glow(b, 16, idleGlow)
 	b.MouseEnter:Connect(function()
-		b.BackgroundColor3 = hover
+		tween(b, 0.16, { BackgroundColor3 = hover })
+		if outline then
+			tween(outline, 0.16, { Transparency = 0.1 })
+		end
+		if shadow then
+			tween(shadow, 0.2, { Transparency = hoverGlow })
+		end
 	end)
 	b.MouseLeave:Connect(function()
-		b.BackgroundColor3 = base
+		tween(b, 0.16, { BackgroundColor3 = rest })
+		if outline then
+			tween(outline, 0.16, { Transparency = 0.55 })
+		end
+		if shadow then
+			tween(shadow, 0.2, { Transparency = idleGlow })
+		end
 	end)
 	return b
 end
 
 ---------------------------------------------------------------------------
--- Layout: header, notice, 1 Connect, 2 Review, 3 Result, footer
+-- Layout: header, notice, 1 Connect, 2 Review and send, 3 Result, footer
 ---------------------------------------------------------------------------
 local header = make("Frame", {
 	Size = UDim2.new(1, 0, 0, 0),
@@ -203,60 +230,103 @@ local header = make("Frame", {
 	BackgroundTransparency = 1,
 	LayoutOrder = 1,
 }, page)
-make("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, header)
-label(header, "CTR Lab", 22, C.green, FONT_BOLD, 1)
-label(header, "Turn your game into a thumbnail brief.", 13, C.muted, FONT, 2)
+make("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, header)
 
-local notice = label(page, "", 13, C.red, FONT, 2)
+local brand = make("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, LayoutOrder = 1 }, header)
+local logo = make("ImageLabel", {
+	Size = UDim2.fromOffset(math.floor(34 * LOGO_RATIO), 34),
+	BackgroundTransparency = 1,
+	Image = LOGO,
+	ScaleType = Enum.ScaleType.Fit,
+}, brand)
+local logoText = make("TextLabel", {
+	Size = UDim2.fromOffset(140, 34),
+	BackgroundTransparency = 1,
+	Text = "CTR Lab",
+	TextColor3 = LIME,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Font = FONT_BOLD,
+	TextSize = 24,
+	Visible = false,
+}, brand)
+local pill = make("TextLabel", {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.fromScale(1, 0.5),
+	Size = UDim2.fromOffset(88, 22),
+	BackgroundColor3 = CARD,
+	BorderSizePixel = 0,
+	Text = "BETA  v" .. VERSION,
+	TextColor3 = LIME,
+	Font = FONT_BOLD,
+	TextSize = 10,
+}, brand)
+corner(pill, 11)
+stroke(pill, LIME, 1, 0.6)
+label(header, "Turn your game into a thumbnail brief.", 13, MUTED, FONT, 2)
+
+-- If the logo cannot be loaded (offline, or Roblox blocks it), the name in text takes its place.
+task.spawn(function()
+	local ok = pcall(function()
+		ContentProvider:PreloadAsync({ logo }, function(_, status)
+			if status ~= Enum.AssetFetchStatus.Success then
+				logo.Visible = false
+				logoText.Visible = true
+			end
+		end)
+	end)
+	if not ok then
+		logo.Visible = false
+		logoText.Visible = true
+	end
+end)
+
+local notice = label(page, "", 13, RED, FONT, 2)
 notice.Visible = false
 
 -- 1 Connect
-local connectCard = card(3, "1   Connect")
-local statusLabel = label(connectCard, "", 13, C.muted, FONT, 1)
+local connectCard = card(3, "1", "Connect")
+local statusLabel = label(connectCard, "", 13, MUTED, FONT, 1)
 local codeBox = make("TextBox", {
-	Size = UDim2.new(1, 0, 0, 38),
-	BackgroundColor3 = C.input,
+	Size = UDim2.new(1, 0, 0, 46),
+	BackgroundColor3 = FIELD,
 	BorderSizePixel = 0,
 	PlaceholderText = "6-digit code",
-	PlaceholderColor3 = C.muted,
+	PlaceholderColor3 = MUTED,
 	Text = "",
-	TextColor3 = C.text,
+	TextColor3 = LIME,
 	ClearTextOnFocus = false,
 	Font = Enum.Font.Code,
-	TextSize = 18,
+	TextSize = 22,
 	LayoutOrder = 2,
 }, connectCard)
-corner(codeBox, 8)
-local codeStroke = stroke(codeBox, C.border)
+corner(codeBox, 12)
+local codeStroke = stroke(codeBox, LIME, 1, 0.7)
 codeBox.Focused:Connect(function()
-	codeStroke.Color = C.green
+	tween(codeStroke, 0.16, { Transparency = 0.15 })
 end)
 codeBox.FocusLost:Connect(function()
-	codeStroke.Color = C.border
+	tween(codeStroke, 0.16, { Transparency = 0.7 })
 end)
 local connectBtn = button(connectCard, "Connect", 3, true)
 local disconnectBtn = button(connectCard, "Disconnect", 4, false)
 
 -- 2 Review and send
-local reviewCard = card(4, "2   Review and send")
-label(reviewCard, "See exactly what would be sent. Nothing leaves Studio until you press Send.", 13, C.muted, FONT, 1)
+local reviewCard = card(4, "2", "Review and send")
+label(reviewCard, "See exactly what would be sent. Nothing leaves Studio until you press Send.", 13, MUTED, FONT, 1)
 local reviewBtn = button(reviewCard, "Review this place", 2, true)
-local statsLabel = label(reviewCard, "", 13, C.green, FONT_BOLD, 3)
+local statsLabel = label(reviewCard, "", 13, LIME, FONT_BOLD, 3)
 local previewBox = make("Frame", {
 	Size = UDim2.new(1, 0, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundColor3 = C.input,
+	BackgroundColor3 = FIELD,
 	BorderSizePixel = 0,
 	LayoutOrder = 4,
 }, reviewCard)
-corner(previewBox, 8)
-pad(previewBox, 10)
-local previewLabel = label(previewBox, "", 12, C.text, Enum.Font.Code, 1)
-local pager = make("Frame", {
-	Size = UDim2.new(1, 0, 0, 32),
-	BackgroundTransparency = 1,
-	LayoutOrder = 5,
-}, reviewCard)
+corner(previewBox, 12)
+stroke(previewBox, LIME, 1, 0.8)
+pad(previewBox, 12)
+local previewLabel = label(previewBox, "", 12, INK, Enum.Font.Code, 1)
+local pager = make("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, LayoutOrder = 5 }, reviewCard)
 local prevBtn = button(pager, "Back", 1, false, UDim2.new(0.28, 0, 1, 0))
 prevBtn.Position = UDim2.fromScale(0, 0)
 local pageLabel = make("TextLabel", {
@@ -264,7 +334,7 @@ local pageLabel = make("TextLabel", {
 	Position = UDim2.fromScale(0.28, 0),
 	BackgroundTransparency = 1,
 	Text = "",
-	TextColor3 = C.muted,
+	TextColor3 = MUTED,
 	Font = FONT,
 	TextSize = 13,
 }, pager)
@@ -273,15 +343,15 @@ nextBtn.Position = UDim2.fromScale(0.72, 0)
 local sendBtn = button(reviewCard, "Send to CTR Lab", 6, true)
 
 -- 3 Result
-local resultCard = card(5, "3   Your thumbnail brief")
-local summaryLabel = label(resultCard, "", 13, C.muted, FONT, 1)
+local resultCard = card(5, "3", "Your thumbnail brief")
+local summaryLabel = label(resultCard, "", 13, MUTED, FONT, 1)
 local promptBox = make("TextBox", {
 	Size = UDim2.new(1, 0, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundColor3 = C.input,
+	BackgroundColor3 = FIELD,
 	BorderSizePixel = 0,
 	Text = "",
-	TextColor3 = C.text,
+	TextColor3 = INK,
 	TextWrapped = true,
 	MultiLine = true,
 	ClearTextOnFocus = false,
@@ -291,12 +361,13 @@ local promptBox = make("TextBox", {
 	TextSize = 13,
 	LayoutOrder = 2,
 }, resultCard)
-corner(promptBox, 8)
-pad(promptBox, 10)
-label(resultCard, "Select the text, copy it, and paste it into the CTR Lab chat.", 12, C.muted, FONT, 3)
-local ideasLabel = label(resultCard, "", 13, C.text, FONT, 4)
+corner(promptBox, 12)
+stroke(promptBox, LIME, 1, 0.7)
+pad(promptBox, 12)
+label(resultCard, "Select the text, copy it, and paste it into the CTR Lab chat.", 12, MUTED, FONT, 3)
+local ideasLabel = label(resultCard, "", 13, INK, FONT, 4)
 
-label(page, "v" .. VERSION .. "  ·  No source code is ever sent  ·  ctr-lab.com/plugin", 11, C.muted, FONT, 6)
+label(page, "No source code is ever sent  ·  ctr-lab.com/plugin", 11, MUTED, FONT, 6)
 
 ---------------------------------------------------------------------------
 -- Network
@@ -420,7 +491,7 @@ local busy = false
 
 local function notify(text, isError)
 	notice.Text = text
-	notice.TextColor3 = isError and C.red or C.green
+	notice.TextColor3 = isError and RED or LIME
 	notice.Visible = text ~= ""
 end
 
@@ -438,8 +509,8 @@ end
 local function render()
 	local connected = plugin:GetSetting(TOKEN_KEY) ~= nil
 	statusLabel.Text = connected and "Connected to your CTR Lab account."
-		or "Create a 6-digit code in your CTR Lab account, then enter it here."
-	statusLabel.TextColor3 = connected and C.green or C.muted
+		or "Create a 6-digit code in your CTR Lab library under Games, then enter it here."
+	statusLabel.TextColor3 = connected and LIME or MUTED
 	codeBox.Visible = not connected
 	connectBtn.Visible = not connected
 	disconnectBtn.Visible = connected

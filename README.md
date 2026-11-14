@@ -36,6 +36,10 @@ Two requests only, both to `https://ctr-lab.com`:
 
 Search `CTRLabConnect.lua` for `RequestAsync`: it appears once, in the `request` function.
 
+The only other thing the plugin loads is its own logo image from Roblox (`rbxassetid://131268296952051`). If the image cannot be loaded, the plugin shows the name "CTR Lab" in text instead.
+
+The window uses Roblox's own UI objects (`UICorner`, `UIStroke`, `UIShadow`, `UIListLayout`, `UIPadding`) in the same lime green look as the CTR Lab Hub.
+
 ## Install
 
 1. In Roblox Studio add a new Script and paste the whole content of `CTRLabConnect.lua` into it.
@@ -54,7 +58,7 @@ certutil -hashfile CTRLabConnect.lua SHA256      # Windows
 shasum -a 256 CTRLabConnect.lua                  # macOS / Linux
 ```
 
-Current version: **0.4.0**, SHA-256 `221e69afde6cccec6905fa51ec4a859f59fe0d9c5c496f20b6ff70a85699fa40`.
+Current version: **0.5.0**, SHA-256 `d76d1469c59a18c19b15d2acf9dd622771f122aa5e35ec02aedb2aaabcabd035`.
 
 You can also check your copy on <https://ctr-lab.com/plugin>: it fetches this file from GitHub in your browser and compares it with yours, so the reference never comes from CTR Lab's own server.
 
