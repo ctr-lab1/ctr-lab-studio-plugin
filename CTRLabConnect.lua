@@ -1,25 +1,38 @@
 --[[
 	CTR Lab Connect for Roblox Studio
-	Version 0.7.0 (beta)
+	Version 0.8.0 (beta)
 
 	WHAT IT DOES
-	Reads the structure of the place you have open and, only after you review it and press "Send",
-	sends a summary to ctr-lab.com. CTR Lab turns that summary into a game description and a
-	thumbnail brief you can use in the CTR Lab chat.
+	Looks at the layout of the place you have open (how big the map is, which models and tools it has,
+	roughly where things are, what colours and materials they use, the lighting) and, only after you
+	review it and press "Send", sends that summary to ctr-lab.com. CTR Lab's AI turns it into a game
+	description, a picture of the map and thumbnail briefs for the CTR Lab chat.
+	It can also set up a small photo set for one item (a copy, never the original) so you can take a screenshot.
 
 	WHAT IT SENDS (shown to you in full before anything leaves Studio)
 	  place name and place ID (a public number, 0 if the place is not published),
-	  instance / script / remote counts, script paths and class names, line counts,
-	  function names, require paths, remote names, service names.
+	  counts of parts, models, meshes, tools, scripts and remotes,
+	  the size of the map and a coarse 10 x 10 overview (how many parts, main material and colour per square),
+	  names, sizes, positions, main colours and materials of the biggest models and of tools,
+	  mesh asset numbers of tools (public numbers), spawn positions,
+	  lighting values (time of day, brightness, colours, sky and atmosphere),
+	  script paths and class names, remote names, names of ScreenGuis.
 
 	WHAT IT NEVER SENDS
-	  script source code, comments, string contents, property values, models, meshes, images,
-	  other places, your Roblox account or any cookies.
+	  script source code (it never reads it), comments, text typed in your game, models, meshes,
+	  textures, images, sounds, other places, your Roblox account or any cookies.
 
 	NETWORK
 	  Two requests only, both to https://ctr-lab.com: "pluginPair" (links this Studio with a
 	  one-time code from your CTR Lab account) and "pluginAnalyze" (sends the summary you approved).
 	  The only other thing it loads is its own logo image from Roblox.
+
+	PHOTO SET (optional)
+	  Select a Tool or Model, press "Make photo set". The plugin puts a copy into Workspace > CTR Lab >
+	  Session <id>, far above the map, in front of a white wall, and points the camera at it. Your original is
+	  not moved. The folder is not saved with your place. "Clean up" removes it and restores the camera.
+	  The plugin cannot take the screenshot itself: use your computer's screenshot tool and paste the picture
+	  into CTR Lab (Ctrl+V).
 
 	INSTALL
 	  1. In Studio add a new Script, paste this whole file into it.
@@ -44,17 +57,23 @@
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 local ContentProvider = game:GetService("ContentProvider")
+local Lighting = game:GetService("Lighting")
+local Selection = game:GetService("Selection")
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
 local API = "https://ctr-lab.com/api/apps/6af3066f697d7b1811bcf9a9/functions/"
 local TOKEN_KEY = "CTRLabToken"
-local VERSION = "0.7.0"
+local VERSION = "0.8.0"
 local LATEST_KEY = "CTRLabLatest"
 local LOGO = "rbxassetid://131268296952051" -- the CTR Lab logo (image asset, 794 x 216)
 local LOGO_RATIO = 794 / 216
-local MAX_SCRIPTS = 400
-local MAX_NAMES = 40
-local MAX_REMOTES = 200
-local PAGE_SIZE = 8 -- entries per page in the review list, keeps the window light
+local MAX_SCRIPTS = 300
+local MAX_REMOTES = 150
+local MAX_PARTS_SEEN = 60000 -- a hard stop so a gigantic place cannot freeze Studio
+local MAX_GROUPS = 60
+local MAX_TOOLS = 40
+local GRID = 10
+local PAGE_SIZE = 8 -- entries per page in the details list
 
 -- The same look as the CTR Lab Hub: near black green, lime accent, the lime glow is Roblox's own UIShadow.
 local LIME = Color3.fromRGB(170, 255, 0)
@@ -139,7 +158,7 @@ local page = make("ScrollingFrame", {
 	ScrollBarImageColor3 = MUTED,
 	ScrollingDirection = Enum.ScrollingDirection.Y,
 }, widget)
-make("UIListLayout", { Padding = UDim.new(0, 18), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+make("UIListLayout", { Padding = UDim.new(0, 14), SortOrder = Enum.SortOrder.LayoutOrder }, page)
 pad(page, 22) -- room for the glow, so it is never cut off at the edge
 
 local function label(parent, text, size, color, font, order)
@@ -158,7 +177,8 @@ local function label(parent, text, size, color, font, order)
 	}, parent)
 end
 
-local function card(order, number, title)
+-- A card with a title. The title is plain; the card glows softly.
+local function card(order, title)
 	local f = make("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
@@ -168,11 +188,10 @@ local function card(order, number, title)
 	}, page)
 	corner(f, 16)
 	stroke(f, LIME, 1, 0.75)
-	glow(f, 22, 0.84)
+	glow(f, 22, 0.86)
 	pad(f, 16)
-	make("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }, f)
-	local head = label(f, string.format('<font color="#AAFF00">%s</font>    %s', number, title), 15, INK, FONT_BOLD, 0)
-	head.RichText = true
+	make("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, f)
+	label(f, title, 16, INK, FONT_BOLD, 0)
 	return f
 end
 
@@ -183,7 +202,7 @@ local function button(parent, text, order, primary, size)
 	local idleGlow = primary and 0.8 or 1
 	local hoverGlow = primary and 0.55 or 0.8
 	local b = make("TextButton", {
-		Size = size or UDim2.new(1, 0, 0, 42),
+		Size = size or UDim2.new(1, 0, 0, 44),
 		BackgroundColor3 = rest,
 		BorderSizePixel = 0,
 		AutoButtonColor = false,
@@ -218,7 +237,7 @@ local function button(parent, text, order, primary, size)
 end
 
 ---------------------------------------------------------------------------
--- Layout: header, notice, 1 Connect, 2 Review and send, 3 Result, footer
+-- Layout: header, 3 steps, one card at a time, photo set, footer
 ---------------------------------------------------------------------------
 local header = make("Frame", {
 	Size = UDim2.new(1, 0, 0, 0),
@@ -258,7 +277,6 @@ local pill = make("TextLabel", {
 }, brand)
 corner(pill, 11)
 stroke(pill, LIME, 1, 0.6)
-label(header, "Turn your game into a thumbnail brief.", 13, MUTED, FONT, 2)
 
 -- If the logo cannot be loaded (offline, or Roblox blocks it), the name in text takes its place.
 task.spawn(function()
@@ -276,18 +294,37 @@ task.spawn(function()
 	end
 end)
 
-local notice = label(page, "", 13, RED, FONT, 2)
+-- The three steps, always visible, the current one lit.
+local stepper = make("Frame", { Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, LayoutOrder = 2 }, page)
+local stepPills = {}
+local STEP_NAMES = { "1  Connect", "2  Scan", "3  Brief" }
+for i, name in ipairs(STEP_NAMES) do
+	local p = make("TextLabel", {
+		Size = UDim2.new(0.32, 0, 1, 0),
+		Position = UDim2.new((i - 1) * 0.34, 0, 0, 0),
+		BackgroundColor3 = CARD,
+		BorderSizePixel = 0,
+		Text = name,
+		TextColor3 = MUTED,
+		Font = FONT_BOLD,
+		TextSize = 12,
+	}, stepper)
+	corner(p, 15)
+	stepPills[i] = { frame = p, stroke = stroke(p, LIME, 1, 0.85) }
+end
+
+local notice = label(page, "", 13, RED, FONT, 3)
 notice.Visible = false
 
--- Shown when CTR Lab says a newer version exists. It uses the answers of the two requests above, so nothing extra is sent.
-local updateNote = label(page, "", 12, LIME, FONT, 2)
+-- Shown when CTR Lab says a newer version exists. It uses the answers of the two requests, so nothing extra is sent.
+local updateNote = label(page, "", 12, LIME, FONT, 4)
 updateNote.Visible = false
 
--- 1 Connect
-local connectCard = card(3, "1", "Connect")
-local statusLabel = label(connectCard, "", 13, MUTED, FONT, 1)
+-- Step 1: Connect
+local connectCard = card(5, "Connect your CTR Lab account")
+label(connectCard, "In CTR Lab open Library, then Games, and press Create a code. Type the code here.", 13, MUTED, FONT, 1)
 local codeBox = make("TextBox", {
-	Size = UDim2.new(1, 0, 0, 46),
+	Size = UDim2.new(1, 0, 0, 48),
 	BackgroundColor3 = FIELD,
 	BorderSizePixel = 0,
 	PlaceholderText = "6-digit code",
@@ -308,13 +345,17 @@ codeBox.FocusLost:Connect(function()
 	tween(codeStroke, 0.16, { Transparency = 0.7 })
 end)
 local connectBtn = button(connectCard, "Connect", 3, true)
-local disconnectBtn = button(connectCard, "Disconnect", 4, false)
 
--- 2 Review and send
-local reviewCard = card(4, "2", "Review and send")
-label(reviewCard, "See exactly what would be sent. Nothing leaves Studio until you press Send.", 13, MUTED, FONT, 1)
-local reviewBtn = button(reviewCard, "Review this place", 2, true)
-local statsLabel = label(reviewCard, "", 13, LIME, FONT_BOLD, 3)
+-- Step 2: Scan
+local scanCard = card(6, "Scan your game")
+label(scanCard, "Reads the map, models and tools. Nothing is sent before you press Send.", 13, MUTED, FONT, 1)
+local scanBtn = button(scanCard, "Scan my game", 2, true)
+
+-- Step 2b: check and send
+local reviewCard = card(7, "Check and send")
+local statsLabel = label(reviewCard, "", 13, LIME, FONT_BOLD, 1)
+local sendBtn = button(reviewCard, "Send to CTR Lab", 2, true)
+local detailsBtn = button(reviewCard, "Show what is sent", 3, false)
 local previewBox = make("Frame", {
 	Size = UDim2.new(1, 0, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
@@ -340,11 +381,12 @@ local pageLabel = make("TextLabel", {
 }, pager)
 local nextBtn = button(pager, "Next", 3, false, UDim2.new(0.28, 0, 1, 0))
 nextBtn.Position = UDim2.fromScale(0.72, 0)
-local sendBtn = button(reviewCard, "Send to CTR Lab", 6, true)
+local rescanBtn = button(reviewCard, "Scan again", 6, false)
 
--- 3 Result
-local resultCard = card(5, "3", "Your thumbnail brief")
-local summaryLabel = label(resultCard, "", 13, MUTED, FONT, 1)
+-- Step 3: Result
+local resultCard = card(8, "Your brief is ready")
+label(resultCard, "Open ctr-lab.com, Library, Games, and press Open in EZ AI Chat. Or copy the brief below.", 13, MUTED, FONT, 1)
+local summaryLabel = label(resultCard, "", 13, INK, FONT, 2)
 local promptBox = make("TextBox", {
 	Size = UDim2.new(1, 0, 0, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
@@ -359,15 +401,30 @@ local promptBox = make("TextBox", {
 	TextYAlignment = Enum.TextYAlignment.Top,
 	Font = FONT,
 	TextSize = 13,
-	LayoutOrder = 2,
+	LayoutOrder = 3,
 }, resultCard)
 corner(promptBox, 12)
 stroke(promptBox, LIME, 1, 0.7)
 pad(promptBox, 12)
-label(resultCard, "Select the text, copy it, and paste it into the CTR Lab chat.", 12, MUTED, FONT, 3)
-local ideasLabel = label(resultCard, "", 13, INK, FONT, 4)
+local ideasLabel = label(resultCard, "", 12, MUTED, FONT, 4)
+local againBtn = button(resultCard, "Scan again", 5, false)
 
-label(page, "No source code is ever sent  ·  ctr-lab.com/plugin", 11, MUTED, FONT, 6)
+-- Item photo set
+local photoCard = card(9, "Photo of an item (optional)")
+label(photoCard, "Select a Tool or Model in the Explorer. A copy goes on a white wall far above the map. Take a screenshot and paste it into CTR Lab.", 13, MUTED, FONT, 1)
+local photoBtn = button(photoCard, "Make photo set", 2, false)
+local cleanBtn = button(photoCard, "Clean up", 3, false)
+
+-- Footer
+local footer = make("Frame", {
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	LayoutOrder = 10,
+}, page)
+make("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, footer)
+local disconnectBtn = button(footer, "Disconnect", 1, false, UDim2.new(1, 0, 0, 34))
+label(footer, "Scripts are never read, no code is ever sent  ·  ctr-lab.com/plugin", 11, MUTED, FONT, 2)
 
 ---------------------------------------------------------------------------
 -- Network
@@ -403,80 +460,523 @@ local function request(name, body, token)
 end
 
 ---------------------------------------------------------------------------
--- Reading the place. Only names and counts, never the source text.
+-- Reading the place. Names, counts, sizes, colours and materials. Script source is never read.
 ---------------------------------------------------------------------------
+local function round(n, d)
+	local m = 10 ^ (d or 0)
+	return math.floor(n * m + 0.5) / m
+end
+
+local function hex(c)
+	return string.format("#%02X%02X%02X", math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+end
+
+local function vec(v)
+	return { round(v.X), round(v.Y), round(v.Z) }
+end
+
+-- The last number in an asset link ("rbxassetid://123" or ".../asset/?id=123").
+local function assetNumber(s)
+	return tonumber(string.match(tostring(s or ""), "(%d+)[^%d]*$"))
+end
+
+local function newStats(name, class)
+	return {
+		name = name,
+		class = class,
+		parts = 0,
+		meshes = 0,
+		unions = 0,
+		weight = 0,
+		r = 0,
+		g = 0,
+		b = 0,
+		mats = {},
+		npc = false,
+		meshIds = {},
+		minV = nil,
+		maxV = nil,
+	}
+end
+
+local function addPart(st, p)
+	st.parts += 1
+	if p:IsA("MeshPart") then
+		st.meshes += 1
+		local id = assetNumber(p.MeshId)
+		if id and #st.meshIds < 3 and not table.find(st.meshIds, id) then
+			table.insert(st.meshIds, id)
+		end
+	elseif p:IsA("UnionOperation") then
+		st.unions += 1
+	end
+	local pos, sz = p.Position, p.Size
+	local half = math.max(sz.X, sz.Y, sz.Z) / 2
+	local lo = Vector3.new(pos.X - half, pos.Y - half, pos.Z - half)
+	local hi = Vector3.new(pos.X + half, pos.Y + half, pos.Z + half)
+	if st.minV == nil then
+		st.minV, st.maxV = lo, hi
+	else
+		st.minV = Vector3.new(math.min(st.minV.X, lo.X), math.min(st.minV.Y, lo.Y), math.min(st.minV.Z, lo.Z))
+		st.maxV = Vector3.new(math.max(st.maxV.X, hi.X), math.max(st.maxV.Y, hi.Y), math.max(st.maxV.Z, hi.Z))
+	end
+	local w = math.min(sz.X * sz.Y * sz.Z, 400) + 1
+	st.weight += w
+	local c = p.Color
+	st.r += c.R * w
+	st.g += c.G * w
+	st.b += c.B * w
+	local m = p.Material.Name
+	st.mats[m] = (st.mats[m] or 0) + w
+end
+
+local function topMaterials(mats, n)
+	local list = {}
+	for name, w in pairs(mats) do
+		table.insert(list, { name = name, w = w })
+	end
+	table.sort(list, function(a, b)
+		return a.w > b.w
+	end)
+	local out = {}
+	for i = 1, math.min(n, #list) do
+		table.insert(out, list[i].name)
+	end
+	return out
+end
+
+local function finishStats(st)
+	local size = st.minV and (st.maxV - st.minV) or Vector3.zero
+	local center = st.minV and ((st.minV + st.maxV) / 2) or Vector3.zero
+	local color = st.weight > 0 and Color3.new(st.r / st.weight, st.g / st.weight, st.b / st.weight) or Color3.new(0.5, 0.5, 0.5)
+	return {
+		name = st.name,
+		class = st.class,
+		parts = st.parts,
+		meshes = st.meshes,
+		unions = st.unions,
+		size = vec(size),
+		center = vec(center),
+		color = hex(color),
+		materials = topMaterials(st.mats, 2),
+		npc = st.npc,
+		meshIds = st.meshIds,
+	}
+end
+
+-- The child of Workspace an instance sits in. Folders are opened one more level, so a folder with many models gives many entries.
+local function groupKey(inst)
+	local node = inst
+	while node and node.Parent ~= workspace do
+		node = node.Parent
+	end
+	if node == nil or node == inst then
+		return nil, nil
+	end
+	if node.ClassName == "Folder" then
+		local second = inst
+		while second and second.Parent ~= node do
+			second = second.Parent
+		end
+		if second and second ~= inst then
+			return second, node.Name .. " / " .. second.Name
+		end
+		return node, node.Name .. " (loose parts)"
+	end
+	return node, node.Name
+end
+
+local function readLighting()
+	local out = {}
+	pcall(function()
+		out.clock = round(Lighting.ClockTime, 1)
+		out.brightness = round(Lighting.Brightness, 1)
+		out.ambient = hex(Lighting.Ambient)
+		out.outdoor = hex(Lighting.OutdoorAmbient)
+		out.fogEnd = round(math.min(Lighting.FogEnd, 100000))
+		out.tech = tostring(Lighting.Technology)
+	end)
+	pcall(function()
+		local atm = Lighting:FindFirstChildOfClass("Atmosphere")
+		if atm then
+			out.atmosphere = { density = round(atm.Density, 2), color = hex(atm.Color), haze = round(atm.Haze, 1) }
+		end
+		local sky = Lighting:FindFirstChildOfClass("Sky")
+		if sky then
+			out.sky = true
+			local ids = {}
+			for _, face in ipairs({ "SkyboxBk", "SkyboxUp", "SkyboxFt" }) do
+				local id = assetNumber(sky[face])
+				if id then
+					table.insert(ids, id)
+				end
+			end
+			out.skyIds = ids
+		else
+			out.sky = false
+		end
+	end)
+	return out
+end
+
 local function collect()
-	local scripts, serviceSet, remoteNames = {}, {}, {}
-	local instanceCount, scriptTotal = 0, 0
-	for _, obj in ipairs(game:GetDescendants()) do
-		instanceCount = instanceCount + 1
-		if (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) and #remoteNames < MAX_REMOTES then
-			table.insert(remoteNames, obj:GetFullName())
+	local scripts, remoteNames, spawns = {}, {}, {}
+	local scriptTotal, remoteTotal, instanceCount = 0, 0, 0
+	local partsSeen, partTotal, modelTotal = 0, 0, 0
+	local truncated = false
+	local groups, order, npcKeys = {}, {}, {}
+	local samples = {}
+	local gMin, gMax = nil, nil
+
+	local all = game:GetDescendants()
+	for i, obj in ipairs(all) do
+		instanceCount += 1
+		if i % 1500 == 0 then
+			task.wait() -- let Studio breathe on big places
 		end
 		if obj:IsA("LuaSourceContainer") then
-			scriptTotal = scriptTotal + 1
+			scriptTotal += 1
 			if #scripts < MAX_SCRIPTS then
-				local src = obj.Source
-				local _, newlines = string.gsub(src, "\n", "")
-				local functions, requires = {}, {}
-				for name in string.gmatch(src, "function%s+([%w_%.:]+)") do
-					if #functions < MAX_NAMES then
-						table.insert(functions, string.sub(name, 1, 80))
+				table.insert(scripts, { path = obj:GetFullName(), class = obj.ClassName })
+			end
+		elseif obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+			remoteTotal += 1
+			if #remoteNames < MAX_REMOTES then
+				table.insert(remoteNames, obj:GetFullName())
+			end
+		elseif obj:IsA("Model") then
+			modelTotal += 1
+		end
+		if obj:IsDescendantOf(workspace) then
+			if obj:IsA("SpawnLocation") and #spawns < 20 then
+				table.insert(spawns, vec(obj.Position))
+			end
+			if obj:IsA("Humanoid") then
+				local key = groupKey(obj)
+				if key then
+					npcKeys[key] = true
+				end
+			end
+			if obj:IsA("BasePart") and not obj:IsA("Terrain") then
+				partTotal += 1
+				if partsSeen < MAX_PARTS_SEEN then
+					partsSeen += 1
+					local pos = obj.Position
+					if gMin == nil then
+						gMin, gMax = pos, pos
+					else
+						gMin = Vector3.new(math.min(gMin.X, pos.X), math.min(gMin.Y, pos.Y), math.min(gMin.Z, pos.Z))
+						gMax = Vector3.new(math.max(gMax.X, pos.X), math.max(gMax.Y, pos.Y), math.max(gMax.Z, pos.Z))
 					end
-				end
-				for path in string.gmatch(src, "require%(([^)\n]+)%)") do
-					if #requires < MAX_NAMES then
-						table.insert(requires, string.sub(path, 1, 120))
+					local sz = obj.Size
+					local w = math.min(sz.X * sz.Y * sz.Z, 400) + 1
+					table.insert(samples, { pos.X, pos.Y, pos.Z, w, obj.Material.Name, obj.Color })
+					local key, name = groupKey(obj)
+					if key then
+						local g = groups[key]
+						if not g then
+							g = newStats(name, key.ClassName)
+							groups[key] = g
+							table.insert(order, key)
+						end
+						addPart(g, obj)
 					end
+				else
+					truncated = true
 				end
-				for svc in string.gmatch(src, 'GetService%("([%w_]+)"%)') do
-					serviceSet[svc] = true
-				end
-				table.insert(scripts, {
-					path = obj:GetFullName(),
-					class = obj.ClassName,
-					lines = newlines + 1,
-					functions = functions,
-					requires = requires,
-				})
 			end
 		end
 	end
-	local services = {}
-	for svc in pairs(serviceSet) do
-		table.insert(services, svc)
+
+	-- The coarse overview: GRID x GRID squares over the map, seen from above.
+	local cells = {}
+	local bounds = nil
+	if gMin then
+		local sx = math.max(gMax.X - gMin.X, 1)
+		local sz = math.max(gMax.Z - gMin.Z, 1)
+		bounds = { min = vec(gMin), max = vec(gMax), size = vec(gMax - gMin) }
+		local acc = {}
+		for _, s in ipairs(samples) do
+			local cx = math.min(GRID - 1, math.floor((s[1] - gMin.X) / sx * GRID))
+			local cz = math.min(GRID - 1, math.floor((s[3] - gMin.Z) / sz * GRID))
+			local k = cz * GRID + cx + 1
+			local a = acc[k]
+			if not a then
+				a = { n = 0, w = 0, r = 0, g = 0, b = 0, top = -math.huge, mats = {} }
+				acc[k] = a
+			end
+			a.n += 1
+			a.w += s[4]
+			a.r += s[6].R * s[4]
+			a.g += s[6].G * s[4]
+			a.b += s[6].B * s[4]
+			if s[2] > a.top then
+				a.top = s[2]
+			end
+			a.mats[s[5]] = (a.mats[s[5]] or 0) + s[4]
+		end
+		for k = 1, GRID * GRID do
+			local a = acc[k]
+			if a then
+				local m = topMaterials(a.mats, 1)[1] or "Plastic"
+				table.insert(cells, { a.n, m, hex(Color3.new(a.r / a.w, a.g / a.w, a.b / a.w)), round(a.top) })
+			else
+				table.insert(cells, { 0, "", "", 0 })
+			end
+		end
 	end
-	table.sort(services)
+
+	-- The biggest models and folders of Workspace.
+	table.sort(order, function(x, y)
+		return groups[x].parts > groups[y].parts
+	end)
+	local models = {}
+	for i = 1, math.min(MAX_GROUPS, #order) do
+		local g = groups[order[i]]
+		g.npc = npcKeys[order[i]] == true
+		table.insert(models, finishStats(g))
+	end
+
+	-- Tools (what players hold or can get): StarterPack and the storage services.
+	local tools = {}
+	for _, svcName in ipairs({ "StarterPack", "ServerStorage", "ReplicatedStorage" }) do
+		local ok, svc = pcall(function()
+			return game:GetService(svcName)
+		end)
+		if ok and svc then
+			for _, obj in ipairs(svc:GetDescendants()) do
+				if obj:IsA("Tool") and #tools < MAX_TOOLS then
+					local st = newStats(obj.Name, "Tool")
+					for _, d in ipairs(obj:GetDescendants()) do
+						if d:IsA("BasePart") then
+							addPart(st, d)
+						end
+					end
+					local fin = finishStats(st)
+					fin.where = svcName
+					table.insert(tools, fin)
+				end
+			end
+		end
+	end
+
+	local guis = {}
+	pcall(function()
+		for _, g in ipairs(game:GetService("StarterGui"):GetChildren()) do
+			if g:IsA("ScreenGui") and #guis < 20 then
+				table.insert(guis, g.Name)
+			end
+		end
+	end)
+
+	local hasTerrain = false
+	pcall(function()
+		local n = workspace.Terrain:CountCells()
+		hasTerrain = type(n) == "number" and n > 0
+	end)
+
+	local services = {}
+	for _, svcName in ipairs({ "Workspace", "ServerScriptService", "ServerStorage", "ReplicatedStorage", "StarterPack", "StarterGui", "StarterPlayer", "Lighting", "SoundService", "Teams" }) do
+		local ok, svc = pcall(function()
+			return game:GetService(svcName)
+		end)
+		if ok and svc and #svc:GetChildren() > 0 then
+			table.insert(services, svcName)
+		end
+	end
+
 	return {
 		place_name = game.Name,
 		place_id = game.PlaceId,
-		stats = { instances = instanceCount, scripts = scriptTotal, remotes = #remoteNames },
+		stats = {
+			instances = instanceCount,
+			scripts = scriptTotal,
+			remotes = remoteTotal,
+			parts = partTotal,
+			models = modelTotal,
+			tools = #tools,
+		},
 		scripts = scripts,
 		remotes = remoteNames,
 		services = services,
+		scene = {
+			bounds = bounds,
+			terrain = hasTerrain,
+			spawns = spawns,
+			grid = { n = GRID, cells = cells },
+			models = models,
+			tools = tools,
+			lighting = readLighting(),
+			guis = guis,
+			truncated = truncated,
+		},
 	}
+end
+
+local function sizeText(s)
+	return string.format("%d x %d x %d studs", s[1], s[2], s[3])
 end
 
 -- The exact content of the summary as readable entries, so the user can check it before sending.
 local function buildItems(payload)
 	local items = {}
+	local sc = payload.scene
 	local head = string.format("Place: %s  (place ID %.0f)", payload.place_name, payload.place_id)
-	head = head .. "\nServices: " .. (#payload.services > 0 and table.concat(payload.services, ", ") or "none")
+	head = head .. "\nContains: " .. (#payload.services > 0 and table.concat(payload.services, ", ") or "nothing")
 	table.insert(items, head)
+	local map = "Map"
+	if sc.bounds then
+		map = map .. ": " .. sizeText(sc.bounds.size)
+	end
+	map = map .. (sc.terrain and ", has terrain" or ", no terrain") .. string.format(", %d spawn(s)", #sc.spawns)
+	table.insert(items, map .. "\nA 10 x 10 overview of part counts, main material and colour is included.")
+	local L = sc.lighting
+	if L and L.clock then
+		local lt = string.format("Lighting: clock %.1f, brightness %.1f, ambient %s", L.clock, L.brightness or 0, L.ambient or "?")
+		if L.atmosphere then
+			lt = lt .. ", atmosphere " .. L.atmosphere.color
+		end
+		lt = lt .. (L.sky and ", custom sky" or ", default sky")
+		table.insert(items, lt)
+	end
+	for _, m in ipairs(sc.models) do
+		local t = string.format("%s  %s  (%d parts, %s, %s%s)", m.npc and "NPC" or "Model", m.name, m.parts, sizeText(m.size), m.color, #m.materials > 0 and ", " .. table.concat(m.materials, "/") or "")
+		table.insert(items, t)
+	end
+	for _, tl in ipairs(sc.tools) do
+		local t = string.format("Tool  %s  in %s  (%d parts, %s, %s)", tl.name, tl.where, tl.parts, sizeText(tl.size), tl.color)
+		if #tl.meshIds > 0 then
+			local ids = {}
+			for _, id in ipairs(tl.meshIds) do
+				table.insert(ids, tostring(id))
+			end
+			t = t .. "\n  mesh numbers: " .. table.concat(ids, ", ")
+		end
+		table.insert(items, t)
+	end
+	if #sc.guis > 0 then
+		table.insert(items, "Screens: " .. table.concat(sc.guis, ", "))
+	end
 	for _, r in ipairs(payload.remotes) do
 		table.insert(items, "Remote  " .. r)
 	end
 	for _, s in ipairs(payload.scripts) do
-		local t = string.format("%s  (%s, %d lines)", s.path, s.class, s.lines)
-		if #s.functions > 0 then
-			t = t .. "\n  functions: " .. table.concat(s.functions, ", ")
-		end
-		if #s.requires > 0 then
-			t = t .. "\n  requires: " .. table.concat(s.requires, ", ")
-		end
-		table.insert(items, t)
+		table.insert(items, string.format("%s  (%s)", s.path, s.class))
 	end
 	return items
+end
+
+---------------------------------------------------------------------------
+-- Photo set: a copy of the selected item on a white wall, far above the map. The original is never moved.
+---------------------------------------------------------------------------
+local photoSession = nil -- { model, camera, cameraCFrame, cameraFocus }
+local PHOTO_ORIGIN = Vector3.new(0, 20000, 0)
+
+local function cleanPhoto()
+	if photoSession then
+		local s = photoSession
+		photoSession = nil
+		if s.folderModel and s.folderModel.Parent then
+			s.folderModel:Destroy()
+		end
+		local root = workspace:FindFirstChild("CTR Lab")
+		if root and #root:GetChildren() == 0 then
+			root:Destroy()
+		end
+		pcall(function()
+			if s.camera then
+				s.camera.CFrame = s.cameraCFrame
+				s.camera.Focus = s.cameraFocus
+			end
+		end)
+		ChangeHistoryService:SetWaypoint("CTR Lab clean up")
+	end
+end
+
+local function makePhoto()
+	local sel = Selection:Get()
+	local src = sel[1]
+	if not src or not (src:IsA("Tool") or src:IsA("Model") or src:IsA("BasePart")) then
+		return nil, "Select a Tool, a Model or a Part in the Explorer first."
+	end
+	cleanPhoto()
+	local copy = src:Clone()
+	if not copy then
+		return nil, "This item cannot be copied."
+	end
+	local session = string.sub(HttpService:GenerateGUID(false), 1, 8)
+
+	local root = workspace:FindFirstChild("CTR Lab")
+	if not root then
+		root = Instance.new("Folder")
+		root.Name = "CTR Lab"
+		root.Archivable = false -- the photo set is never saved with the place
+		root.Parent = workspace
+	end
+	local set = Instance.new("Model")
+	set.Name = "Session " .. session
+	set:SetAttribute("CTRLabSession", session)
+	set.Archivable = false
+
+	-- The copy is only for looking: no scripts, no physics.
+	local holder = Instance.new("Model")
+	holder.Name = "Item"
+	copy.Parent = holder
+	for _, d in ipairs(holder:GetDescendants()) do
+		if d:IsA("LuaSourceContainer") then
+			d:Destroy()
+		elseif d:IsA("BasePart") then
+			d.Anchored = true
+			d.CanCollide = false
+		end
+	end
+	if holder:IsA("Model") and copy:IsA("BasePart") then
+		copy.Anchored = true
+	end
+	holder.Parent = set
+	local cf, size = holder:GetBoundingBox()
+	holder:PivotTo(holder:GetPivot() - (cf.Position - PHOTO_ORIGIN))
+	local radius = math.max(size.Magnitude / 2, 2)
+
+	local cam = workspace.CurrentCamera
+	local fov = cam and cam.FieldOfView or 70
+	local dist = (radius / math.tan(math.rad(fov / 2))) * 1.2
+	local camPos = PHOTO_ORIGIN + Vector3.new(0, radius * 0.15, dist)
+
+	local wall = Instance.new("Part")
+	wall.Name = "White wall"
+	wall.Anchored = true
+	wall.CanCollide = false
+	wall.CastShadow = false
+	wall.Material = Enum.Material.SmoothPlastic
+	wall.Color = Color3.new(1, 1, 1)
+	wall.Size = Vector3.new(radius * 40, radius * 40, 1)
+	wall.CFrame = CFrame.new(PHOTO_ORIGIN + Vector3.new(0, 0, -(size.Z / 2 + radius * 0.8)))
+	wall.Parent = set
+
+	local lamp = Instance.new("Part")
+	lamp.Name = "Light"
+	lamp.Anchored = true
+	lamp.CanCollide = false
+	lamp.Transparency = 1
+	lamp.Size = Vector3.new(1, 1, 1)
+	lamp.Position = camPos + Vector3.new(radius * 0.4, radius * 0.8, 0)
+	local pl = Instance.new("PointLight")
+	pl.Range = 60
+	pl.Brightness = 2
+	pl.Parent = lamp
+	lamp.Parent = set
+
+	set.Parent = root
+
+	photoSession = { folderModel = set, camera = cam, cameraCFrame = cam and cam.CFrame, cameraFocus = cam and cam.Focus }
+	if cam then
+		cam.CFrame = CFrame.lookAt(camPos, PHOTO_ORIGIN)
+		cam.Focus = CFrame.new(PHOTO_ORIGIN)
+	end
+	Selection:Set({})
+	ChangeHistoryService:SetWaypoint("CTR Lab photo set")
+	return session, nil
 end
 
 ---------------------------------------------------------------------------
@@ -486,6 +986,7 @@ local pending = nil -- the summary the user is reviewing, not sent yet
 local items = {}
 local pageIndex = 1
 local pageCount = 1
+local showDetails = false
 local result = nil
 local busy = false
 
@@ -542,23 +1043,29 @@ end
 
 local function render()
 	local connected = plugin:GetSetting(TOKEN_KEY) ~= nil
-	statusLabel.Text = connected and "Connected to your CTR Lab account."
-		or "Create a 6-digit code in your CTR Lab library under Games, then enter it here."
-	statusLabel.TextColor3 = connected and LIME or MUTED
-	codeBox.Visible = not connected
-	connectBtn.Visible = not connected
+	local reviewing = connected and pending ~= nil
+	local done = connected and result ~= nil
+	local step = (not connected) and 1 or (done and 3 or 2)
+	for i, p in ipairs(stepPills) do
+		local on = i == step
+		local past = i < step
+		p.frame.TextColor3 = on and ON_LIME or (past and LIME or MUTED)
+		p.frame.BackgroundColor3 = on and LIME or CARD
+		p.stroke.Transparency = on and 1 or (past and 0.4 or 0.85)
+	end
+
+	connectCard.Visible = not connected
+	scanCard.Visible = connected and not reviewing and not done
+	reviewCard.Visible = reviewing
+	resultCard.Visible = done
+	photoCard.Visible = connected
+	cleanBtn.Visible = photoSession ~= nil
+	footer.Visible = true
 	disconnectBtn.Visible = connected
 
-	reviewCard.Visible = connected
-	local reviewing = connected and pending ~= nil
-	statsLabel.Visible = reviewing
-	previewBox.Visible = reviewing
-	pager.Visible = reviewing and pageCount > 1
-	sendBtn.Visible = reviewing
-	reviewBtn.Text = reviewing and "Review again" or "Review this place"
-	reviewBtn.Visible = true
-
-	resultCard.Visible = connected and result ~= nil
+	previewBox.Visible = reviewing and showDetails
+	pager.Visible = reviewing and showDetails and pageCount > 1
+	detailsBtn.Text = showDetails and "Hide details" or "Show what is sent"
 end
 
 -- One action at a time, and any error ends up as a message instead of a broken window.
@@ -593,6 +1100,7 @@ connectBtn.Activated:Connect(function()
 		plugin:SetSetting(TOKEN_KEY, data.token)
 		noteLatest(data)
 		codeBox.Text = ""
+		notify("Connected. Next: scan your game.", false)
 		render()
 	end)
 end)
@@ -603,31 +1111,47 @@ disconnectBtn.Activated:Connect(function()
 		pending = nil
 		items = {}
 		result = nil
+		showDetails = false
 		notify("", false)
 		render()
 	end)
 end)
 
-reviewBtn.Activated:Connect(function()
+local function scan(button)
 	run(function()
 		notify("", false)
 		result = nil
-		reviewBtn.Text = "Reading..."
+		button.Text = "Scanning..."
 		task.wait() -- let the window redraw before the scan
 		local payload = collect()
+		button.Text = (button == scanBtn) and "Scan my game" or "Scan again"
 		pending = payload
 		items = buildItems(payload)
 		pageCount = math.max(1, math.ceil(#items / PAGE_SIZE))
 		pageIndex = 1
-		statsLabel.Text = string.format(
-			"%d scripts  ·  %d remotes  ·  %d instances",
-			payload.stats.scripts,
-			payload.stats.remotes,
-			payload.stats.instances
-		)
+		showDetails = false
+		local st = payload.stats
+		statsLabel.Text = string.format("%d parts  ·  %d models  ·  %d tools  ·  %d scripts", st.parts, st.models, st.tools, st.scripts)
 		showPage()
 		render()
 	end)
+end
+
+scanBtn.Activated:Connect(function()
+	scan(scanBtn)
+end)
+rescanBtn.Activated:Connect(function()
+	scan(rescanBtn)
+end)
+againBtn.Activated:Connect(function()
+	result = nil
+	pending = nil
+	render()
+end)
+
+detailsBtn.Activated:Connect(function()
+	showDetails = not showDetails
+	render()
 end)
 
 prevBtn.Activated:Connect(function()
@@ -677,11 +1201,34 @@ sendBtn.Activated:Connect(function()
 	end)
 end)
 
+photoBtn.Activated:Connect(function()
+	run(function()
+		notify("", false)
+		local id, err = makePhoto()
+		if not id then
+			notify(err or "Could not make the photo set.", true)
+		else
+			notify("Photo set ready (session " .. id .. "). Take a screenshot, then press Clean up.", false)
+		end
+		render()
+	end)
+end)
+
+cleanBtn.Activated:Connect(function()
+	run(function()
+		cleanPhoto()
+		notify("Photo set removed.", false)
+		render()
+	end)
+end)
+
 toggle.Click:Connect(function()
 	widget.Enabled = not widget.Enabled
 end)
 widget:GetPropertyChangedSignal("Enabled"):Connect(function()
 	toggle:SetActive(widget.Enabled)
 end)
+-- Never leave a photo set behind when the plugin is unloaded.
+plugin.Unloading:Connect(cleanPhoto)
 
 render()
