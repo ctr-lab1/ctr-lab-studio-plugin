@@ -34,6 +34,8 @@ Two requests only, both to `https://ctr-lab.com`:
 | `pluginPair` | You enter the one-time 6-digit code from your CTR Lab account. Returns an access token for this Studio. |
 | `pluginAnalyze` | You press Send. Sends the summary you reviewed. |
 
+From 0.7.0 on, the answers of these two requests also carry the newest version number. Studio Link remembers it on your computer and shows "A new version is available" when yours is older. It sends nothing extra for this.
+
 Search `CTRLabConnect.lua` for `RequestAsync`: it appears once, in the `request` function.
 
 The only other thing Studio Link loads is its own logo image from Roblox (`rbxassetid://131268296952051`). If the image cannot be loaded, it shows the name "CTR Lab" in text instead.
@@ -58,7 +60,7 @@ certutil -hashfile CTRLabConnect.lua SHA256      # Windows
 shasum -a 256 CTRLabConnect.lua                  # macOS / Linux
 ```
 
-Current version: **0.6.0**, SHA-256 `1ced11ce16437c94ec083ec03c7af34897cfe505ed89fe4f81080183cd0f5239`.
+Current version: **0.7.0**, SHA-256 `404a6f934db3bf07e05f348339acd806df77377cae261315ef173dd8f9844781`.
 
 You can also check your copy on <https://ctr-lab.com/plugin>: it fetches this file from GitHub in your browser and compares it with yours, so the reference never comes from CTR Lab's own server.
 

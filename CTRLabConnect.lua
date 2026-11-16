@@ -1,6 +1,6 @@
 --[[
 	CTR Lab Connect for Roblox Studio
-	Version 0.6.0 (beta)
+	Version 0.7.0 (beta)
 
 	WHAT IT DOES
 	Reads the structure of the place you have open and, only after you review it and press "Send",
@@ -47,7 +47,8 @@ local ContentProvider = game:GetService("ContentProvider")
 
 local API = "https://ctr-lab.com/api/apps/6af3066f697d7b1811bcf9a9/functions/"
 local TOKEN_KEY = "CTRLabToken"
-local VERSION = "0.6.0"
+local VERSION = "0.7.0"
+local LATEST_KEY = "CTRLabLatest"
 local LOGO = "rbxassetid://131268296952051" -- the CTR Lab logo (image asset, 794 x 216)
 local LOGO_RATIO = 794 / 216
 local MAX_SCRIPTS = 400
@@ -278,6 +279,10 @@ end)
 local notice = label(page, "", 13, RED, FONT, 2)
 notice.Visible = false
 
+-- Shown when CTR Lab says a newer version exists. It uses the answers of the two requests above, so nothing extra is sent.
+local updateNote = label(page, "", 12, LIME, FONT, 2)
+updateNote.Visible = false
+
 -- 1 Connect
 local connectCard = card(3, "1", "Connect")
 local statusLabel = label(connectCard, "", 13, MUTED, FONT, 1)
@@ -484,6 +489,40 @@ local pageCount = 1
 local result = nil
 local busy = false
 
+local function versionParts(v)
+	local a, b, c = string.match(tostring(v or ""), "^(%d+)%.(%d+)%.(%d+)$")
+	return { tonumber(a) or 0, tonumber(b) or 0, tonumber(c) or 0 }
+end
+
+local function isNewer(a, b)
+	local x, y = versionParts(a), versionParts(b)
+	for i = 1, 3 do
+		if x[i] ~= y[i] then
+			return x[i] > y[i]
+		end
+	end
+	return false
+end
+
+local function showUpdate(latest)
+	if type(latest) == "string" and isNewer(latest, VERSION) then
+		updateNote.Text = "A new version (" .. latest .. ") is available. Studio updates plugins from the Creator Store by itself. If you installed it by hand, get the new file from github.com/ctr-lab1/ctr-lab-studio-plugin"
+		updateNote.Visible = true
+	else
+		updateNote.Visible = false
+	end
+end
+
+-- Remember what the last answer said, so the hint is still there the next time the window opens.
+local function noteLatest(data)
+	if type(data) == "table" and type(data.latest_version) == "string" then
+		plugin:SetSetting(LATEST_KEY, data.latest_version)
+		showUpdate(data.latest_version)
+	end
+end
+
+showUpdate(plugin:GetSetting(LATEST_KEY))
+
 local function notify(text, isError)
 	notice.Text = text
 	notice.TextColor3 = isError and RED or LIME
@@ -552,6 +591,7 @@ connectBtn.Activated:Connect(function()
 			return
 		end
 		plugin:SetSetting(TOKEN_KEY, data.token)
+		noteLatest(data)
 		codeBox.Text = ""
 		render()
 	end)
@@ -620,6 +660,7 @@ sendBtn.Activated:Connect(function()
 			render()
 			return
 		end
+		noteLatest(data)
 		local a = data.analysis
 		pending = nil
 		items = {}
