@@ -1,8 +1,8 @@
-# CTR Lab for Roblox Studio
+# CTR Lab Studio Link
 
-Turn your game into a thumbnail brief. This plugin reads the **structure** of the place you have open, shows you exactly what it found, and only sends it to [CTR Lab](https://ctr-lab.com) after you approve. It never sends your code.
+Studio Link is the CTR Lab plugin for Roblox Studio. It turns your game into a thumbnail brief. It reads the **structure** of the place you have open, shows you exactly what it found, and only sends it to [CTR Lab](https://ctr-lab.com) after you approve. It never sends your code.
 
-Status: **closed beta**. Anyone can read and use the source, but only accounts CTR Lab has invited can link the plugin. The server refuses every other request.
+Status: **beta, included in the paid CTR Lab plans**. Anyone can read and analyse the source, but only accounts on a paid plan can link Studio Link. Each plan has a number of runs per month (a scan from Studio or a new AI brief). The server refuses every other request.
 
 Public page with the same information: <https://ctr-lab.com/plugin>
 
@@ -36,7 +36,7 @@ Two requests only, both to `https://ctr-lab.com`:
 
 Search `CTRLabConnect.lua` for `RequestAsync`: it appears once, in the `request` function.
 
-The only other thing the plugin loads is its own logo image from Roblox (`rbxassetid://131268296952051`). If the image cannot be loaded, the plugin shows the name "CTR Lab" in text instead.
+The only other thing Studio Link loads is its own logo image from Roblox (`rbxassetid://131268296952051`). If the image cannot be loaded, it shows the name "CTR Lab" in text instead.
 
 The window uses Roblox's own UI objects (`UICorner`, `UIStroke`, `UIShadow`, `UIListLayout`, `UIPadding`) in the same lime green look as the CTR Lab Hub.
 
@@ -58,14 +58,12 @@ certutil -hashfile CTRLabConnect.lua SHA256      # Windows
 shasum -a 256 CTRLabConnect.lua                  # macOS / Linux
 ```
 
-Current version: **0.5.0**, SHA-256 `d76d1469c59a18c19b15d2acf9dd622771f122aa5e35ec02aedb2aaabcabd035`.
+Current version: **0.6.0**, SHA-256 `1ced11ce16437c94ec083ec03c7af34897cfe505ed89fe4f81080183cd0f5239`.
 
 You can also check your copy on <https://ctr-lab.com/plugin>: it fetches this file from GitHub in your browser and compares it with yours, so the reference never comes from CTR Lab's own server.
 
-## Contributing
+## Terms of use
 
-Issues and pull requests are welcome. Please keep the plugin small, read-only and transparent: anything new that leaves Studio must appear in the review list first.
+Studio Link is owned by CTR Lab, all rights reserved. The source is public so you can read it, run it in your own Studio and check that it is safe. Please do not copy, modify, redistribute, resell or reuse it in other plugins or products. If you want to build on it, ask first at <https://ctr-lab.com>. Details in [LICENSE](LICENSE).
 
-## License
-
-MIT, see [LICENSE](LICENSE).
+Found a problem or a security concern? Open an issue and we will look at it.

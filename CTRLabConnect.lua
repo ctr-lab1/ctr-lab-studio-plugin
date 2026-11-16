@@ -1,6 +1,6 @@
 --[[
 	CTR Lab Connect for Roblox Studio
-	Version 0.5.0 (closed beta)
+	Version 0.6.0 (beta)
 
 	WHAT IT DOES
 	Reads the structure of the place you have open and, only after you review it and press "Send",
@@ -26,24 +26,19 @@
 	  2. Right-click the Script, choose "Save as Local Plugin...", then delete the Script.
 	  3. Open the "CTR Lab" button in the Plugins tab.
 
-	MIT License
+	LICENSE AND TERMS OF USE
+	Copyright (c) 2026 CTR Lab. All rights reserved. CTR Lab Connect is owned by CTR Lab.
 
-	Copyright (c) CTR Lab
+	You are welcome to read this file, run it in your own Studio and analyse it, so you can
+	see for yourself that it is safe and that it never sends your code. That is what the source
+	is published for.
 
-	Permission is hereby granted, free of charge, to any person obtaining a copy of this software
-	and associated documentation files (the "Software"), to deal in the Software without
-	restriction, including without limitation the rights to use, copy, modify, merge, publish,
-	distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
-	Software is furnished to do so, subject to the following conditions:
+	Please do not copy, modify, repackage, redistribute, resell or reuse it or parts of it in
+	other plugins or products. It only works together with CTR Lab and a CTR Lab account.
+	No licence beyond personal use and inspection is granted. If you want to build on it,
+	ask first at https://ctr-lab.com.
 
-	The above copyright notice and this permission notice shall be included in all copies or
-	substantial portions of the Software.
-
-	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
-	BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-	NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-	DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -52,7 +47,7 @@ local ContentProvider = game:GetService("ContentProvider")
 
 local API = "https://ctr-lab.com/api/apps/6af3066f697d7b1811bcf9a9/functions/"
 local TOKEN_KEY = "CTRLabToken"
-local VERSION = "0.5.0"
+local VERSION = "0.6.0"
 local LOGO = "rbxassetid://131268296952051" -- the CTR Lab logo (image asset, 794 x 216)
 local LOGO_RATIO = 794 / 216
 local MAX_SCRIPTS = 400
@@ -78,7 +73,7 @@ local FONT_BOLD = Enum.Font.GothamBold
 -- Window and building blocks
 ---------------------------------------------------------------------------
 local toolbar = plugin:CreateToolbar("CTR Lab")
-local toggle = toolbar:CreateButton("CTR Lab", "Open CTR Lab Connect", "")
+local toggle = toolbar:CreateButton("CTR Lab", "Open CTR Lab Connect", "rbxassetid://127805693114615")
 toggle.ClickableWhenViewportHidden = true
 
 local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 340, 600, 300, 380)
