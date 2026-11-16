@@ -74,7 +74,7 @@ local FONT_BOLD = Enum.Font.GothamBold
 -- Window and building blocks
 ---------------------------------------------------------------------------
 local toolbar = plugin:CreateToolbar("CTR Lab")
-local toggle = toolbar:CreateButton("CTR Lab", "Open CTR Lab Connect", "rbxassetid://127805693114615")
+local toggle = toolbar:CreateButton("CTR Lab", "Open CTR Lab Connect", "rbxassetid://86792551935093")
 toggle.ClickableWhenViewportHidden = true
 
 local info = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 340, 600, 300, 380)
