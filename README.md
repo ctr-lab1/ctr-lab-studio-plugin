@@ -1,6 +1,6 @@
 # CTR Lab Studio Link
 
-Studio Link is the CTR Lab plugin for Roblox Studio. It turns your game into thumbnail briefs. It looks at the **layout** of the place you have open (map size, models, tools, colours, light), shows you exactly what it found, and only sends it to [CTR Lab](https://ctr-lab.com) after you approve. It never reads or sends your scripts.
+Studio Link is the CTR Lab plugin for Roblox Studio. It turns your game into thumbnail briefs. It looks at the **layout** of the place you have open (map size, models, tools, colours, light), shows you exactly what it found, and only sends it to [CTR Lab](https://ctr-lab.com) after you approve. It reads your scripts on your computer only to find names (functions, DataStores, stats), and never sends your code.
 
 Status: **beta, included in the paid CTR Lab plans**. Anyone can read and analyse the source, but only accounts on a paid plan can link Studio Link. Each plan has a number of runs per month (a scan from Studio or a new AI brief). The server refuses every other request.
 
@@ -17,10 +17,11 @@ Only after you press **Send to CTR Lab**, and you can see the full list first (b
 - spawn positions
 - lighting values: time of day, brightness, colours, sky and atmosphere
 - script paths and class names, remote names, names of ScreenGuis
+- names found in your scripts: line count and function names per script, require paths, Roblox services used, DataStore names, attribute and tag names, leaderstat names, game pass and product numbers, names of remotes that are fired
 
 ## What it never sends
 
-- the source code of your scripts. **Studio Link never reads it** (version 0.8.0 and newer; older versions counted lines and function names)
+- your script code. Studio Link reads scripts locally only to pull out the names listed above; the code, comments and strings are never sent
 - comments, text typed in your game, textures, images, sounds or the models themselves
 - other places, or files from your computer
 - your Roblox account, password or cookies
@@ -64,7 +65,7 @@ certutil -hashfile CTRLabConnect.lua SHA256      # Windows
 shasum -a 256 CTRLabConnect.lua                  # macOS / Linux
 ```
 
-Current version: **0.8.0**, SHA-256 `22aa0da4a088b8eb37768d2175584a9477e77e3434be2b4e3498e6121825ac71`.
+Current version: **0.8.0**, SHA-256 `76b488a66089defc387d9244e9f507e3e28499e4ca3b3c43ea2e7a79fd46228f`.
 
 You can also check your copy on <https://ctr-lab.com/plugin>: it fetches this file from GitHub in your browser and compares it with yours, so the reference never comes from CTR Lab's own server.
 

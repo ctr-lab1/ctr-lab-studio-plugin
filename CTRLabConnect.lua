@@ -4,9 +4,10 @@
 
 	WHAT IT DOES
 	Looks at the layout of the place you have open (how big the map is, which models and tools it has,
-	roughly where things are, what colours and materials they use, the lighting) and, only after you
-	review it and press "Send", sends that summary to ctr-lab.com. CTR Lab's AI turns it into a game
-	description, a picture of the map and thumbnail briefs for the CTR Lab chat.
+	roughly where things are, what colours and materials they use, the lighting) and at what your scripts
+	do (names of functions, modules, DataStores, stats, game passes), and, only after you review it and
+	press "Send", sends that summary to ctr-lab.com. CTR Lab's AI turns it into a game description, a
+	picture of the map and thumbnail briefs for the CTR Lab chat.
 	It can also set up a small photo set for one item (a copy, never the original) so you can take a screenshot.
 
 	WHAT IT SENDS (shown to you in full before anything leaves Studio)
@@ -16,11 +17,16 @@
 	  names, sizes, positions, main colours and materials of the biggest models and of tools,
 	  mesh asset numbers of tools (public numbers), spawn positions,
 	  lighting values (time of day, brightness, colours, sky and atmosphere),
-	  script paths and class names, remote names, names of ScreenGuis.
+	  script paths and class names, for each script its line count, function names and require paths,
+	  remote names, names of ScreenGuis,
+	  names found in your scripts: Roblox services used, DataStore names, attribute and tag names,
+	  leaderstat names, game pass and developer product numbers, names of remotes that are fired.
 
 	WHAT IT NEVER SENDS
-	  script source code (it never reads it), comments, text typed in your game, models, meshes,
-	  textures, images, sounds, other places, your Roblox account or any cookies.
+	  your script source code. Studio Link reads the scripts on your computer only to find the names
+	  listed above, and only those names are sent: never the code, its comments, strings or logic.
+	  Also never text typed in your game, models, meshes, textures, images, sounds, other places,
+	  your Roblox account or any cookies.
 
 	NETWORK
 	  Two requests only, both to https://ctr-lab.com: "pluginPair" (links this Studio with a
@@ -68,6 +74,7 @@ local LATEST_KEY = "CTRLabLatest"
 local LOGO = "rbxassetid://131268296952051" -- the CTR Lab logo (image asset, 794 x 216)
 local LOGO_RATIO = 794 / 216
 local MAX_SCRIPTS = 300
+local MAX_NAMES = 40
 local MAX_REMOTES = 150
 local MAX_PARTS_SEEN = 60000 -- a hard stop so a gigantic place cannot freeze Studio
 local MAX_GROUPS = 60
@@ -348,7 +355,7 @@ local connectBtn = button(connectCard, "Connect", 3, true)
 
 -- Step 2: Scan
 local scanCard = card(6, "Scan your game")
-label(scanCard, "Reads the map, models and tools. Nothing is sent before you press Send.", 13, MUTED, FONT, 1)
+label(scanCard, "Reads the map, models, tools and what your scripts do. Nothing is sent before you press Send.", 13, MUTED, FONT, 1)
 local scanBtn = button(scanCard, "Scan my game", 2, true)
 
 -- Step 2b: check and send
@@ -424,7 +431,7 @@ local footer = make("Frame", {
 }, page)
 make("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, footer)
 local disconnectBtn = button(footer, "Disconnect", 1, false, UDim2.new(1, 0, 0, 34))
-label(footer, "Scripts are never read, no code is ever sent  ·  ctr-lab.com/plugin", 11, MUTED, FONT, 2)
+label(footer, "Only names are sent, never your code  ·  ctr-lab.com/plugin", 11, MUTED, FONT, 2)
 
 ---------------------------------------------------------------------------
 -- Network
@@ -625,6 +632,13 @@ local function collect()
 	local partsSeen, partTotal, modelTotal = 0, 0, 0
 	local truncated = false
 	local groups, order, npcKeys = {}, {}, {}
+	local serviceSet = {}
+	local systems = { datastores = {}, attributes = {}, tags = {}, leaderstats = {}, products = {}, events = {} }
+	local function addUnique(list, v, max)
+		if v ~= nil and #list < max and not table.find(list, v) then
+			table.insert(list, v)
+		end
+	end
 	local samples = {}
 	local gMin, gMax = nil, nil
 
@@ -637,7 +651,58 @@ local function collect()
 		if obj:IsA("LuaSourceContainer") then
 			scriptTotal += 1
 			if #scripts < MAX_SCRIPTS then
-				table.insert(scripts, { path = obj:GetFullName(), class = obj.ClassName })
+				local entry = { path = obj:GetFullName(), class = obj.ClassName, lines = 0, functions = {}, requires = {} }
+				-- The code is read here on your computer only to find names. Only the names are kept; the code is dropped.
+				local okSrc, src = pcall(function()
+					return obj.Source
+				end)
+				if okSrc and type(src) == "string" then
+					local _, newlines = string.gsub(src, "\n", "")
+					entry.lines = newlines + 1
+					for name in string.gmatch(src, "function%s+([%w_%.:]+)") do
+						if #entry.functions < MAX_NAMES then
+							table.insert(entry.functions, string.sub(name, 1, 80))
+						end
+					end
+					for path in string.gmatch(src, "require%(([^)\n]+)%)") do
+						if #entry.requires < MAX_NAMES then
+							table.insert(entry.requires, string.sub(path, 1, 120))
+						end
+					end
+					for svc in string.gmatch(src, "GetService%(%s*[\"']([%w_]+)[\"']%s*%)") do
+						serviceSet[svc] = true
+					end
+					for n in string.gmatch(src, "GetDataStore%(%s*[\"']([^\"']+)[\"']") do
+						addUnique(systems.datastores, string.sub(n, 1, 40), 20)
+					end
+					for n in string.gmatch(src, "SetAttribute%(%s*[\"']([^\"']+)[\"']") do
+						addUnique(systems.attributes, string.sub(n, 1, 40), 40)
+					end
+					for n in string.gmatch(src, "GetTagged%(%s*[\"']([^\"']+)[\"']") do
+						addUnique(systems.tags, string.sub(n, 1, 40), 20)
+					end
+					for n in string.gmatch(src, ":AddTag%([^,%)]-,%s*[\"']([^\"']+)[\"']") do
+						addUnique(systems.tags, string.sub(n, 1, 40), 20)
+					end
+					if string.find(src, "leaderstats", 1, true) then
+						for n in string.gmatch(src, "%.Name%s*=%s*[\"']([^\"']+)[\"']") do
+							addUnique(systems.leaderstats, string.sub(n, 1, 30), 12)
+						end
+					end
+					for id in string.gmatch(src, "[Pp]roductId%s*=%s*(%d+)") do
+						addUnique(systems.products, tonumber(id), 20)
+					end
+					for id in string.gmatch(src, "GamePassId%s*=%s*(%d+)") do
+						addUnique(systems.products, tonumber(id), 20)
+					end
+					for id in string.gmatch(src, "Prompt%w*Purchase%([^,%)]*,%s*(%d+)") do
+						addUnique(systems.products, tonumber(id), 20)
+					end
+					for n in string.gmatch(src, "([%w_]+):Fire%w*%(") do
+						addUnique(systems.events, string.sub(n, 1, 40), 40)
+					end
+				end
+				table.insert(scripts, entry)
 			end
 		elseif obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
 			remoteTotal += 1
@@ -776,14 +841,10 @@ local function collect()
 	end)
 
 	local services = {}
-	for _, svcName in ipairs({ "Workspace", "ServerScriptService", "ServerStorage", "ReplicatedStorage", "StarterPack", "StarterGui", "StarterPlayer", "Lighting", "SoundService", "Teams" }) do
-		local ok, svc = pcall(function()
-			return game:GetService(svcName)
-		end)
-		if ok and svc and #svc:GetChildren() > 0 then
-			table.insert(services, svcName)
-		end
+	for svc in pairs(serviceSet) do
+		table.insert(services, svc)
 	end
+	table.sort(services)
 
 	return {
 		place_name = game.Name,
@@ -799,6 +860,7 @@ local function collect()
 		scripts = scripts,
 		remotes = remoteNames,
 		services = services,
+		systems = systems,
 		scene = {
 			bounds = bounds,
 			terrain = hasTerrain,
@@ -822,7 +884,7 @@ local function buildItems(payload)
 	local items = {}
 	local sc = payload.scene
 	local head = string.format("Place: %s  (place ID %.0f)", payload.place_name, payload.place_id)
-	head = head .. "\nContains: " .. (#payload.services > 0 and table.concat(payload.services, ", ") or "nothing")
+	head = head .. "\nServices used by scripts: " .. (#payload.services > 0 and table.concat(payload.services, ", ") or "none")
 	table.insert(items, head)
 	local map = "Map"
 	if sc.bounds then
@@ -860,8 +922,29 @@ local function buildItems(payload)
 	for _, r in ipairs(payload.remotes) do
 		table.insert(items, "Remote  " .. r)
 	end
+	local sy = payload.systems
+	local names = {}
+	for _, key in ipairs({ "datastores", "attributes", "tags", "leaderstats", "products", "events" }) do
+		if sy[key] and #sy[key] > 0 then
+			local list = {}
+			for _, v in ipairs(sy[key]) do
+				table.insert(list, tostring(v))
+			end
+			table.insert(names, key .. ": " .. table.concat(list, ", "))
+		end
+	end
+	if #names > 0 then
+		table.insert(items, "Names found in scripts\n" .. table.concat(names, "\n"))
+	end
 	for _, s in ipairs(payload.scripts) do
-		table.insert(items, string.format("%s  (%s)", s.path, s.class))
+		local t = string.format("%s  (%s, %d lines)", s.path, s.class, s.lines)
+		if #s.functions > 0 then
+			t = t .. "\n  functions: " .. table.concat(s.functions, ", ")
+		end
+		if #s.requires > 0 then
+			t = t .. "\n  requires: " .. table.concat(s.requires, ", ")
+		end
+		table.insert(items, t)
 	end
 	return items
 end
